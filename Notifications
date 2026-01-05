@@ -1,0 +1,424 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { Bell, BellOff, Clock, Calendar, Target, Sparkles, Volume2, VolumeX, Plus, Trash2, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+
+export default function Notifications() {
+  const [permissionStatus, setPermissionStatus] = useState(
+    "Notification" in window ? Notification.permission : "unsupported"
+  );
+  const [newTime, setNewTime] = useState("");
+  const queryClient = useQueryClient();
+
+  const { data: settings = [], isLoading } = useQuery({
+    queryKey: ["notificationSettings"],
+    queryFn: () => base44.entities.NotificationSettings.list()
+  });
+
+  const userSettings = settings[0];
+
+  const createMutation = useMutation({
+    mutationFn: (data) => base44.entities.NotificationSettings.create(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notificationSettings"] })
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (data) => base44.entities.NotificationSettings.update(userSettings.id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notificationSettings"] })
+  });
+
+  // Initialize settings if not exists
+  useEffect(() => {
+    if (!isLoading && settings.length === 0) {
+      createMutation.mutate({
+        enabled: true,
+        daily_reminder: true,
+        daily_reminder_time: "09:00",
+        deadline_reminder: true,
+        deadline_hours_before: 24,
+        focus_reminder: true,
+        focus_reminder_times: ["09:00", "14:00", "20:00"],
+        completion_celebration: true,
+        sound_enabled: true
+      });
+    }
+  }, [isLoading, settings]);
+
+  const requestPermission = async () => {
+    if ("Notification" in window) {
+      const permission = await Notification.requestPermission();
+      setPermissionStatus(permission);
+      
+      if (permission === "granted" && userSettings) {
+        updateMutation.mutate({ enabled: true });
+        // Send test notification
+        new Notification("🎉 Notificações Ativadas!", {
+          body: "Você receberá lembretes sobre suas tarefas",
+          icon: "/icon-192.png"
+        });
+      }
+    }
+  };
+
+  const updateSetting = (key, value) => {
+    if (userSettings) {
+      updateMutation.mutate({ [key]: value });
+    }
+  };
+
+  const addFocusTime = () => {
+    if (newTime && userSettings) {
+      const times = userSettings.focus_reminder_times || [];
+      if (!times.includes(newTime)) {
+        updateMutation.mutate({
+          focus_reminder_times: [...times, newTime].sort()
+        });
+      }
+      setNewTime("");
+    }
+  };
+
+  const removeFocusTime = (time) => {
+    if (userSettings) {
+      updateMutation.mutate({
+        focus_reminder_times: userSettings.focus_reminder_times.filter(t => t !== time)
+      });
+    }
+  };
+
+  const sendTestNotification = () => {
+    if (Notification.permission === "granted") {
+      new Notification("🧪 Notificação de Teste", {
+        body: "Suas notificações estão funcionando perfeitamente!",
+        icon: "/icon-192.png"
+      });
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-white">Carregando...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 pb-24">
+      {/* Header */}
+      <div className="px-5 pt-12 pb-6">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h1 className="text-2xl font-bold text-white">Notificações</h1>
+          <p className="text-slate-400 text-sm mt-1">Configure seus lembretes</p>
+        </motion.div>
+      </div>
+
+      <div className="px-5 space-y-4">
+        {/* Permission Status */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`p-5 rounded-3xl border ${
+            permissionStatus === "granted"
+              ? "bg-emerald-500/10 border-emerald-500/20"
+              : permissionStatus === "denied"
+              ? "bg-red-500/10 border-red-500/20"
+              : "bg-amber-500/10 border-amber-500/20"
+          }`}
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex items-start gap-3">
+              {permissionStatus === "granted" ? (
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center">
+                  <Bell className="w-6 h-6 text-emerald-400" />
+                </div>
+              ) : (
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 flex items-center justify-center">
+                  <BellOff className="w-6 h-6 text-amber-400" />
+                </div>
+              )}
+              <div className="flex-1">
+                <h3 className={`font-semibold ${
+                  permissionStatus === "granted" ? "text-emerald-400" : "text-amber-400"
+                }`}>
+                  {permissionStatus === "granted" ? "Notificações Ativas" : 
+                   permissionStatus === "denied" ? "Notificações Bloqueadas" : 
+                   "Ativar Notificações"}
+                </h3>
+                <p className="text-slate-400 text-sm mt-1">
+                  {permissionStatus === "granted" 
+                    ? "Você receberá lembretes sobre tarefas e prazos"
+                    : permissionStatus === "denied"
+                    ? "Ative as notificações nas configurações do navegador"
+                    : "Permita notificações para receber lembretes"}
+                </p>
+              </div>
+            </div>
+            {permissionStatus !== "granted" && permissionStatus !== "denied" && (
+              <Button
+                onClick={requestPermission}
+                className="bg-violet-600 hover:bg-violet-700 whitespace-nowrap"
+              >
+                Ativar
+              </Button>
+            )}
+          </div>
+
+          {permissionStatus === "granted" && (
+            <Button
+              onClick={sendTestNotification}
+              variant="outline"
+              className="w-full mt-4 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10"
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              Enviar Notificação de Teste
+            </Button>
+          )}
+        </motion.div>
+
+        {/* Settings - Only show if permission granted */}
+        {permissionStatus === "granted" && userSettings && (
+          <>
+            {/* Master Toggle */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="p-4 rounded-2xl bg-slate-900/50 border border-white/5"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Bell className="w-5 h-5 text-violet-400" />
+                  <div>
+                    <p className="text-white font-medium">Todas as Notificações</p>
+                    <p className="text-slate-500 text-xs">Ativar/desativar tudo</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={userSettings.enabled}
+                  onCheckedChange={(checked) => updateSetting("enabled", checked)}
+                  className="data-[state=checked]:bg-violet-600"
+                />
+              </div>
+            </motion.div>
+
+            {/* Daily Reminder */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="p-4 rounded-2xl bg-slate-900/50 border border-white/5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <Calendar className="w-5 h-5 text-blue-400" />
+                  <div>
+                    <p className="text-white font-medium">Lembrete Diário</p>
+                    <p className="text-slate-500 text-xs">Resumo das tarefas pendentes</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={userSettings.daily_reminder}
+                  onCheckedChange={(checked) => updateSetting("daily_reminder", checked)}
+                  disabled={!userSettings.enabled}
+                  className="data-[state=checked]:bg-violet-600"
+                />
+              </div>
+              {userSettings.daily_reminder && (
+                <div className="pl-8">
+                  <label className="text-slate-400 text-xs mb-2 block">Horário</label>
+                  <Input
+                    type="time"
+                    value={userSettings.daily_reminder_time}
+                    onChange={(e) => updateSetting("daily_reminder_time", e.target.value)}
+                    className="bg-slate-800 border-slate-700 text-white w-32"
+                  />
+                </div>
+              )}
+            </motion.div>
+
+            {/* Deadline Reminder */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="p-4 rounded-2xl bg-slate-900/50 border border-white/5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <Clock className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <p className="text-white font-medium">Alerta de Prazo</p>
+                    <p className="text-slate-500 text-xs">Notificar antes do vencimento</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={userSettings.deadline_reminder}
+                  onCheckedChange={(checked) => updateSetting("deadline_reminder", checked)}
+                  disabled={!userSettings.enabled}
+                  className="data-[state=checked]:bg-violet-600"
+                />
+              </div>
+              {userSettings.deadline_reminder && (
+                <div className="pl-8">
+                  <label className="text-slate-400 text-xs mb-2 block">Notificar com antecedência</label>
+                  <div className="flex gap-2">
+                    {[1, 6, 12, 24, 48].map(hours => (
+                      <button
+                        key={hours}
+                        onClick={() => updateSetting("deadline_hours_before", hours)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                          userSettings.deadline_hours_before === hours
+                            ? "bg-violet-500/20 text-violet-400 border border-violet-500/30"
+                            : "bg-slate-800 text-slate-400 border border-slate-700"
+                        }`}
+                      >
+                        {hours}h
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+
+            {/* Focus Reminders */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="p-4 rounded-2xl bg-slate-900/50 border border-white/5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <Target className="w-5 h-5 text-emerald-400" />
+                  <div>
+                    <p className="text-white font-medium">Lembretes de Foco</p>
+                    <p className="text-slate-500 text-xs">Horários para iniciar sessões</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={userSettings.focus_reminder}
+                  onCheckedChange={(checked) => updateSetting("focus_reminder", checked)}
+                  disabled={!userSettings.enabled}
+                  className="data-[state=checked]:bg-violet-600"
+                />
+              </div>
+              {userSettings.focus_reminder && (
+                <div className="pl-8 space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {(userSettings.focus_reminder_times || []).map(time => (
+                      <Badge
+                        key={time}
+                        variant="secondary"
+                        className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 pl-2 pr-1 py-1"
+                      >
+                        <Clock className="w-3 h-3 mr-1" />
+                        {time}
+                        <button
+                          onClick={() => removeFocusTime(time)}
+                          className="ml-2 p-0.5 hover:bg-emerald-500/20 rounded"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      type="time"
+                      value={newTime}
+                      onChange={(e) => setNewTime(e.target.value)}
+                      className="bg-slate-800 border-slate-700 text-white flex-1"
+                      placeholder="Adicionar horário"
+                    />
+                    <Button
+                      onClick={addFocusTime}
+                      disabled={!newTime}
+                      size="icon"
+                      className="bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+
+            {/* Celebration */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="p-4 rounded-2xl bg-slate-900/50 border border-white/5"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="w-5 h-5 text-violet-400" />
+                  <div>
+                    <p className="text-white font-medium">Comemoração</p>
+                    <p className="text-slate-500 text-xs">Celebrar conclusão de tarefas</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={userSettings.completion_celebration}
+                  onCheckedChange={(checked) => updateSetting("completion_celebration", checked)}
+                  disabled={!userSettings.enabled}
+                  className="data-[state=checked]:bg-violet-600"
+                />
+              </div>
+            </motion.div>
+
+            {/* Sound */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6 }}
+              className="p-4 rounded-2xl bg-slate-900/50 border border-white/5"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {userSettings.sound_enabled ? (
+                    <Volume2 className="w-5 h-5 text-violet-400" />
+                  ) : (
+                    <VolumeX className="w-5 h-5 text-slate-500" />
+                  )}
+                  <div>
+                    <p className="text-white font-medium">Som</p>
+                    <p className="text-slate-500 text-xs">Tocar som nas notificações</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={userSettings.sound_enabled}
+                  onCheckedChange={(checked) => updateSetting("sound_enabled", checked)}
+                  disabled={!userSettings.enabled}
+                  className="data-[state=checked]:bg-violet-600"
+                />
+              </div>
+            </motion.div>
+          </>
+        )}
+
+        {/* Info Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7 }}
+          className="p-4 rounded-2xl bg-slate-800/30 border border-slate-700/50"
+        >
+          <p className="text-slate-400 text-xs leading-relaxed">
+            💡 <strong className="text-slate-300">Dica:</strong> Mantenha o app aberto em uma aba do navegador para receber notificações. 
+            As notificações funcionam melhor quando o navegador está ativo.
+          </p>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
