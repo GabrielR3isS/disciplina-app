@@ -1,0 +1,390 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { 
+  Calendar, 
+  RefreshCw, 
+  Download, 
+  AlertCircle, 
+  CheckCircle2,
+  ExternalLink,
+  Settings,
+  Zap,
+  FileDown
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
+
+export default function CalendarSettings() {
+  const [isExporting, setIsExporting] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: settings = [] } = useQuery({
+    queryKey: ["calendarSettings"],
+    queryFn: () => base44.entities.CalendarSettings.list()
+  });
+
+  const { data: tasks = [] } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => base44.entities.Task.list("-created_date", 100)
+  });
+
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["focusSessions"],
+    queryFn: () => base44.entities.FocusSession.list("-created_date", 100)
+  });
+
+  const userSettings = settings[0];
+
+  const createMutation = useMutation({
+    mutationFn: (data) => base44.entities.CalendarSettings.create(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["calendarSettings"] })
+  });
+
+  // Generate ICS file for manual export
+  const exportToICS = () => {
+    setIsExporting(true);
+    
+    let icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//FocusLock//Task Calendar//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:FocusLock - Tarefas e Sessões',
+      'X-WR-TIMEZONE:America/Sao_Paulo'
+    ];
+
+    // Add tasks with due dates
+    tasks.filter(t => t.due_date && t.status === "pending").forEach(task => {
+      const dueDate = new Date(task.due_date);
+      const dateStr = format(dueDate, "yyyyMMdd");
+      
+      icsContent.push(
+        'BEGIN:VEVENT',
+        `UID:task-${task.id}@focuslock.app`,
+        `DTSTAMP:${format(new Date(), "yyyyMMdd'T'HHmmss'Z'")}`,
+        `DTSTART;VALUE=DATE:${dateStr}`,
+        `SUMMARY:📋 ${task.title}`,
+        `DESCRIPTION:${task.description || 'Tarefa FocusLock'}\\n\\nPrioridade: ${task.priority}\\nCategoria: ${task.category}`,
+        `CATEGORIES:TASK,FOCUSLOCK`,
+        'STATUS:CONFIRMED',
+        'BEGIN:VALARM',
+        'TRIGGER:-PT1H',
+        'ACTION:DISPLAY',
+        `DESCRIPTION:Lembrete: ${task.title}`,
+        'END:VALARM',
+        'END:VEVENT'
+      );
+    });
+
+    // Add completed focus sessions
+    sessions.filter(s => !s.is_active && s.end_time).forEach(session => {
+      const startDate = new Date(session.start_time);
+      const endDate = new Date(session.end_time);
+      
+      icsContent.push(
+        'BEGIN:VEVENT',
+        `UID:session-${session.id}@focuslock.app`,
+        `DTSTAMP:${format(new Date(), "yyyyMMdd'T'HHmmss'Z'")}`,
+        `DTSTART:${format(startDate, "yyyyMMdd'T'HHmmss")}`,
+        `DTEND:${format(endDate, "yyyyMMdd'T'HHmmss")}`,
+        `SUMMARY:🎯 Sessão de Foco (${session.duration_minutes}min)`,
+        `DESCRIPTION:Sessão de foco FocusLock\\n\\nTarefas concluídas: ${session.tasks_completed}\\nDuração: ${session.duration_minutes} minutos`,
+        `CATEGORIES:FOCUS,FOCUSLOCK`,
+        'STATUS:CONFIRMED',
+        'END:VEVENT'
+      );
+    });
+
+    icsContent.push('END:VCALENDAR');
+
+    // Create and download file
+    const blob = new Blob([icsContent.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `focuslock-calendar-${format(new Date(), 'yyyy-MM-dd')}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    
+    setTimeout(() => setIsExporting(false), 1000);
+  };
+
+  const pendingTasksCount = tasks.filter(t => t.status === "pending" && t.due_date).length;
+  const completedSessionsCount = sessions.filter(s => !s.is_active && s.end_time).length;
+
+  return (
+    <div className="min-h-screen bg-slate-950 pb-24">
+      {/* Header */}
+      <div className="px-5 pt-12 pb-6">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h1 className="text-2xl font-bold text-white">Integração de Calendário</h1>
+          <p className="text-slate-400 text-sm mt-1">Sincronize tarefas e sessões de foco</p>
+        </motion.div>
+      </div>
+
+      <div className="px-5 space-y-4">
+        {/* Backend Functions Required Notice */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-5 rounded-3xl bg-amber-500/10 border border-amber-500/20"
+        >
+          <div className="flex gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-6 h-6 text-amber-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-amber-400 font-semibold mb-2">Funções Backend Necessárias</h3>
+              <p className="text-slate-300 text-sm leading-relaxed mb-3">
+                Para sincronizar automaticamente com Google Calendar e Outlook, você precisa ativar as 
+                <strong className="text-amber-400"> Funções Backend</strong> nas configurações do app.
+              </p>
+              <div className="bg-slate-900/50 rounded-xl p-3 mb-3">
+                <p className="text-slate-400 text-xs mb-2">📋 <strong>Como ativar:</strong></p>
+                <ol className="text-slate-400 text-xs space-y-1 ml-4 list-decimal">
+                  <li>Acesse o Dashboard do Base44</li>
+                  <li>Vá em <strong className="text-slate-300">Settings</strong> → <strong className="text-slate-300">Backend Functions</strong></li>
+                  <li>Ative as funções backend</li>
+                  <li>Retorne aqui para conectar seus calendários</li>
+                </ol>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                onClick={() => window.open('https://app.base44.com', '_blank')}
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Abrir Dashboard Base44
+              </Button>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Features Preview */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="p-5 rounded-3xl bg-slate-900/50 border border-white/5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="w-5 h-5 text-violet-400" />
+            <h3 className="text-white font-semibold">Recursos Disponíveis Após Ativação</h3>
+          </div>
+          <div className="space-y-3">
+            {[
+              {
+                icon: "📅",
+                title: "Sincronização Automática",
+                description: "Tarefas e sessões sincronizadas em tempo real"
+              },
+              {
+                icon: "🔄",
+                title: "Bi-direcional",
+                description: "Alterações no calendário refletem no app e vice-versa"
+              },
+              {
+                icon: "📊",
+                title: "Visualização Integrada",
+                description: "Veja eventos do calendário no dashboard do app"
+              },
+              {
+                icon: "⚡",
+                title: "Múltiplos Calendários",
+                description: "Google Calendar e Outlook simultaneamente"
+              }
+            ].map((feature, index) => (
+              <div
+                key={index}
+                className="flex items-start gap-3 p-3 rounded-xl bg-slate-800/30"
+              >
+                <span className="text-2xl">{feature.icon}</span>
+                <div>
+                  <p className="text-white font-medium text-sm">{feature.title}</p>
+                  <p className="text-slate-400 text-xs mt-0.5">{feature.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* Manual Export Option */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="p-5 rounded-3xl bg-slate-900/50 border border-white/5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <FileDown className="w-5 h-5 text-emerald-400" />
+            <h3 className="text-white font-semibold">Exportação Manual (Disponível Agora)</h3>
+          </div>
+          <p className="text-slate-400 text-sm mb-4">
+            Enquanto as funções backend não estão ativadas, você pode exportar suas tarefas 
+            e sessões como arquivo ICS e importá-lo manualmente no seu calendário.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+              <div className="flex items-center gap-2 mb-1">
+                <Calendar className="w-4 h-4 text-emerald-400" />
+                <span className="text-emerald-400 text-xs font-medium">Tarefas</span>
+              </div>
+              <p className="text-white font-bold text-xl">{pendingTasksCount}</p>
+              <p className="text-slate-500 text-xs">com prazo definido</p>
+            </div>
+            <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
+              <div className="flex items-center gap-2 mb-1">
+                <Zap className="w-4 h-4 text-violet-400" />
+                <span className="text-violet-400 text-xs font-medium">Sessões</span>
+              </div>
+              <p className="text-white font-bold text-xl">{completedSessionsCount}</p>
+              <p className="text-slate-500 text-xs">concluídas</p>
+            </div>
+          </div>
+
+          <Button
+            onClick={exportToICS}
+            disabled={isExporting || (pendingTasksCount === 0 && completedSessionsCount === 0)}
+            className="w-full bg-emerald-600 hover:bg-emerald-700"
+          >
+            {isExporting ? (
+              <>
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                Exportando...
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 mr-2" />
+                Exportar para Calendário (.ics)
+              </>
+            )}
+          </Button>
+
+          <div className="mt-4 p-3 rounded-xl bg-slate-800/30">
+            <p className="text-slate-400 text-xs mb-2">
+              <strong className="text-slate-300">Como importar:</strong>
+            </p>
+            <ul className="text-slate-400 text-xs space-y-1 ml-4 list-disc">
+              <li><strong>Google Calendar:</strong> Settings → Import & Export → Import</li>
+              <li><strong>Outlook:</strong> Calendar → Add Calendar → Upload from file</li>
+              <li><strong>Apple Calendar:</strong> File → Import</li>
+            </ul>
+          </div>
+        </motion.div>
+
+        {/* Calendar Providers Preview (Disabled) */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="space-y-3 opacity-50 pointer-events-none"
+        >
+          <p className="text-slate-500 text-xs uppercase tracking-wider font-medium">
+            🔒 Requer Backend Functions
+          </p>
+          
+          {/* Google Calendar */}
+          <div className="p-4 rounded-2xl bg-slate-900/50 border border-white/5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-white font-medium">Google Calendar</p>
+                  <Badge variant="secondary" className="mt-1 text-xs bg-slate-800">
+                    Não conectado
+                  </Badge>
+                </div>
+              </div>
+              <Button
+                disabled
+                variant="outline"
+                className="border-blue-500/30 text-blue-400"
+              >
+                Conectar
+              </Button>
+            </div>
+          </div>
+
+          {/* Outlook Calendar */}
+          <div className="p-4 rounded-2xl bg-slate-900/50 border border-white/5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-500/20 flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-sky-400" />
+                </div>
+                <div>
+                  <p className="text-white font-medium">Outlook Calendar</p>
+                  <Badge variant="secondary" className="mt-1 text-xs bg-slate-800">
+                    Não conectado
+                  </Badge>
+                </div>
+              </div>
+              <Button
+                disabled
+                variant="outline"
+                className="border-sky-500/30 text-sky-400"
+              >
+                Conectar
+              </Button>
+            </div>
+          </div>
+
+          {/* Sync Options */}
+          <div className="p-4 rounded-2xl bg-slate-900/50 border border-white/5">
+            <h4 className="text-white font-medium mb-3">Opções de Sincronização</h4>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-300 text-sm">Sincronizar Tarefas</p>
+                  <p className="text-slate-500 text-xs">Exportar tarefas pendentes</p>
+                </div>
+                <Switch disabled checked />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-300 text-sm">Sincronizar Sessões de Foco</p>
+                  <p className="text-slate-500 text-xs">Registrar sessões no calendário</p>
+                </div>
+                <Switch disabled checked />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-300 text-sm">Sincronização Automática</p>
+                  <p className="text-slate-500 text-xs">Atualizar em tempo real</p>
+                </div>
+                <Switch disabled checked />
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Help Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="p-4 rounded-2xl bg-slate-800/30 border border-slate-700/50"
+        >
+          <p className="text-slate-400 text-xs leading-relaxed">
+            💡 <strong className="text-slate-300">Precisa de ajuda?</strong> A integração com calendários 
+            funciona através de OAuth e requer backend functions para segurança. Após ativar, você poderá 
+            conectar quantos calendários quiser e a sincronização será automática.
+          </p>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
