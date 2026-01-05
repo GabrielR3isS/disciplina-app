@@ -1,0 +1,301 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
+import { Plus, Check, Trash2, ChevronDown, Calendar } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+
+const priorityConfig = {
+  high: { label: "Alta", color: "bg-red-500/20 text-red-400 border-red-500/30" },
+  medium: { label: "Média", color: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+  low: { label: "Baixa", color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" }
+};
+
+const categoryConfig = {
+  work: { label: "Trabalho", icon: "💼" },
+  health: { label: "Saúde", icon: "❤️" },
+  personal: { label: "Pessoal", icon: "✨" },
+  study: { label: "Estudos", icon: "📚" },
+  home: { label: "Casa", icon: "🏠" }
+};
+
+export default function Tasks() {
+  const [showForm, setShowForm] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [newTask, setNewTask] = useState({
+    title: "",
+    description: "",
+    priority: "medium",
+    category: "personal",
+    due_date: ""
+  });
+
+  const queryClient = useQueryClient();
+
+  const { data: tasks = [], isLoading } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => base44.entities.Task.list("-created_date", 100)
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data) => base44.entities.Task.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      setShowForm(false);
+      setNewTask({ title: "", description: "", priority: "medium", category: "personal", due_date: "" });
+    }
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.Task.update(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks"] })
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => base44.entities.Task.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tasks"] })
+  });
+
+  const filteredTasks = tasks.filter(task => {
+    if (filter === "all") return true;
+    if (filter === "pending") return task.status === "pending";
+    if (filter === "completed") return task.status === "completed";
+    return true;
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!newTask.title.trim()) return;
+    createMutation.mutate(newTask);
+  };
+
+  const toggleComplete = async (task) => {
+    const newStatus = task.status === "completed" ? "pending" : "completed";
+    
+    updateMutation.mutate({
+      id: task.id,
+      data: {
+        status: newStatus,
+        completed_at: newStatus === "completed" ? new Date().toISOString() : null
+      }
+    });
+
+    // Show celebration notification if completing task
+    if (newStatus === "completed") {
+      const settingsData = await base44.entities.NotificationSettings.list();
+      if (settingsData[0]?.completion_celebration && "Notification" in window && Notification.permission === "granted") {
+        new Notification("✅ Tarefa Concluída!", {
+          body: `"${task.title}" foi marcada como concluída!`,
+          icon: "/icon-192.png"
+        });
+      }
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 pb-24">
+      {/* Header */}
+      <div className="px-5 pt-12 pb-6">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h1 className="text-2xl font-bold text-white">Minhas Tarefas</h1>
+          <p className="text-slate-400 text-sm mt-1">
+            {tasks.filter(t => t.status === "pending").length} pendentes
+          </p>
+        </motion.div>
+      </div>
+
+      <div className="px-5 space-y-4">
+        {/* Filter Tabs */}
+        <div className="flex gap-2 overflow-x-auto pb-2">
+          {[
+            { value: "all", label: "Todas" },
+            { value: "pending", label: "Pendentes" },
+            { value: "completed", label: "Concluídas" }
+          ].map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setFilter(tab.value)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+                filter === tab.value
+                  ? "bg-violet-500/20 text-violet-400 border border-violet-500/30"
+                  : "bg-slate-800/50 text-slate-400 border border-transparent"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Task List */}
+        <div className="space-y-3">
+          <AnimatePresence mode="popLayout">
+            {filteredTasks.map((task, index) => (
+              <motion.div
+                key={task.id}
+                layout
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, x: -100 }}
+                transition={{ delay: index * 0.05 }}
+                className={`p-4 rounded-2xl bg-slate-900/50 border border-white/5 ${
+                  task.status === "completed" ? "opacity-60" : ""
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <button
+                    onClick={() => toggleComplete(task)}
+                    className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                      task.status === "completed"
+                        ? "bg-emerald-500 border-emerald-500"
+                        : "border-slate-600 hover:border-emerald-500"
+                    }`}
+                  >
+                    {task.status === "completed" && (
+                      <Check className="w-3.5 h-3.5 text-white" />
+                    )}
+                  </button>
+
+                  <div className="flex-1 min-w-0">
+                    <p className={`font-medium ${
+                      task.status === "completed" 
+                        ? "text-slate-500 line-through" 
+                        : "text-white"
+                    }`}>
+                      {task.title}
+                    </p>
+                    {task.description && (
+                      <p className="text-slate-500 text-sm mt-1 line-clamp-2">
+                        {task.description}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                      <span className="text-lg">
+                        {categoryConfig[task.category]?.icon || "📋"}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${priorityConfig[task.priority]?.color}`}>
+                        {priorityConfig[task.priority]?.label}
+                      </span>
+                      {task.due_date && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {new Date(task.due_date).toLocaleDateString("pt-BR")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => deleteMutation.mutate(task.id)}
+                    className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          {filteredTasks.length === 0 && !isLoading && (
+            <div className="text-center py-12">
+              <div className="text-4xl mb-3">📋</div>
+              <p className="text-slate-400">Nenhuma tarefa encontrada</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Add Task Sheet */}
+      <Sheet open={showForm} onOpenChange={setShowForm}>
+        <SheetTrigger asChild>
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            className="fixed bottom-24 right-5 w-14 h-14 bg-gradient-to-br from-violet-500 to-violet-700 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/30"
+          >
+            <Plus className="w-6 h-6 text-white" />
+          </motion.button>
+        </SheetTrigger>
+        <SheetContent side="bottom" className="bg-slate-900 border-slate-800 rounded-t-3xl">
+          <SheetHeader>
+            <SheetTitle className="text-white text-left">Nova Tarefa</SheetTitle>
+          </SheetHeader>
+          <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+            <Input
+              placeholder="Título da tarefa"
+              value={newTask.title}
+              onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+              className="bg-slate-800 border-slate-700 text-white"
+            />
+            <Textarea
+              placeholder="Descrição (opcional)"
+              value={newTask.description}
+              onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+              className="bg-slate-800 border-slate-700 text-white h-20"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <Select
+                value={newTask.priority}
+                onValueChange={(v) => setNewTask({ ...newTask, priority: v })}
+              >
+                <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                  <SelectValue placeholder="Prioridade" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-700">
+                  <SelectItem value="low">🟢 Baixa</SelectItem>
+                  <SelectItem value="medium">🟡 Média</SelectItem>
+                  <SelectItem value="high">🔴 Alta</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={newTask.category}
+                onValueChange={(v) => setNewTask({ ...newTask, category: v })}
+              >
+                <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                  <SelectValue placeholder="Categoria" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-700">
+                  {Object.entries(categoryConfig).map(([key, val]) => (
+                    <SelectItem key={key} value={key}>
+                      {val.icon} {val.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Input
+              type="date"
+              value={newTask.due_date}
+              onChange={(e) => setNewTask({ ...newTask, due_date: e.target.value })}
+              className="bg-slate-800 border-slate-700 text-white"
+            />
+            <Button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="w-full bg-violet-600 hover:bg-violet-700 text-white py-6"
+            >
+              {createMutation.isPending ? "Criando..." : "Criar Tarefa"}
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
