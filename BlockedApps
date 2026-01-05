@@ -1,0 +1,297 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
+import { Plus, Lock, Unlock, Trash2, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+
+const categoryConfig = {
+  social: { label: "Redes Sociais", icon: "📱" },
+  entertainment: { label: "Entretenimento", icon: "🎬" },
+  games: { label: "Jogos", icon: "🎮" },
+  shopping: { label: "Compras", icon: "🛒" },
+  other: { label: "Outros", icon: "📦" }
+};
+
+const popularApps = [
+  { name: "Instagram", icon: "📸", category: "social" },
+  { name: "TikTok", icon: "🎵", category: "social" },
+  { name: "WhatsApp", icon: "💬", category: "social" },
+  { name: "YouTube", icon: "▶️", category: "entertainment" },
+  { name: "Twitter/X", icon: "🐦", category: "social" },
+  { name: "Facebook", icon: "👤", category: "social" },
+  { name: "Netflix", icon: "🎬", category: "entertainment" },
+  { name: "Spotify", icon: "🎧", category: "entertainment" },
+  { name: "Discord", icon: "🎮", category: "social" },
+  { name: "Snapchat", icon: "👻", category: "social" },
+  { name: "Reddit", icon: "🤖", category: "social" },
+  { name: "Pinterest", icon: "📌", category: "social" }
+];
+
+export default function BlockedApps() {
+  const [showForm, setShowForm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [newApp, setNewApp] = useState({
+    name: "",
+    icon: "📱",
+    category: "social",
+    is_blocked: true
+  });
+
+  const queryClient = useQueryClient();
+
+  const { data: blockedApps = [], isLoading } = useQuery({
+    queryKey: ["blockedApps"],
+    queryFn: () => base44.entities.BlockedApp.list("-created_date", 100)
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data) => base44.entities.BlockedApp.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["blockedApps"] });
+      setShowForm(false);
+      setNewApp({ name: "", icon: "📱", category: "social", is_blocked: true });
+    }
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => base44.entities.BlockedApp.update(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["blockedApps"] })
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => base44.entities.BlockedApp.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["blockedApps"] })
+  });
+
+  const handleAddPopular = (app) => {
+    const exists = blockedApps.find(a => a.name === app.name);
+    if (!exists) {
+      createMutation.mutate({ ...app, is_blocked: true });
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!newApp.name.trim()) return;
+    createMutation.mutate(newApp);
+  };
+
+  const filteredPopular = popularApps.filter(app => 
+    app.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
+    !blockedApps.find(a => a.name === app.name)
+  );
+
+  const activeBlocks = blockedApps.filter(a => a.is_blocked).length;
+
+  return (
+    <div className="min-h-screen bg-slate-950 pb-24">
+      {/* Header */}
+      <div className="px-5 pt-12 pb-6">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h1 className="text-2xl font-bold text-white">Apps Bloqueados</h1>
+          <p className="text-slate-400 text-sm mt-1">
+            {activeBlocks} de {blockedApps.length} apps bloqueados
+          </p>
+        </motion.div>
+      </div>
+
+      <div className="px-5 space-y-5">
+        {/* Status Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`p-5 rounded-3xl ${
+            activeBlocks > 0 
+              ? "bg-gradient-to-br from-violet-600/20 to-violet-800/20 border border-violet-500/20"
+              : "bg-slate-900/50 border border-white/5"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                activeBlocks > 0 ? "bg-violet-500/20" : "bg-slate-800"
+              }`}>
+                {activeBlocks > 0 ? (
+                  <Lock className="w-6 h-6 text-violet-400" />
+                ) : (
+                  <Unlock className="w-6 h-6 text-slate-400" />
+                )}
+              </div>
+              <div>
+                <p className="text-white font-semibold">
+                  {activeBlocks > 0 ? "Proteção Ativa" : "Sem Proteção"}
+                </p>
+                <p className="text-slate-400 text-sm">
+                  {activeBlocks > 0 
+                    ? `${activeBlocks} apps serão bloqueados durante o foco`
+                    : "Adicione apps para bloquear"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* My Blocked Apps */}
+        {blockedApps.length > 0 && (
+          <div>
+            <h3 className="text-white font-semibold mb-3">Meus Apps</h3>
+            <div className="space-y-2">
+              <AnimatePresence>
+                {blockedApps.map((app, index) => (
+                  <motion.div
+                    key={app.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -100 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="flex items-center justify-between p-4 rounded-2xl bg-slate-900/50 border border-white/5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">{app.icon || "📱"}</span>
+                      <div>
+                        <p className="text-white font-medium">{app.name}</p>
+                        <p className="text-slate-500 text-xs">
+                          {categoryConfig[app.category]?.label || "Outros"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Switch
+                        checked={app.is_blocked}
+                        onCheckedChange={(checked) => 
+                          updateMutation.mutate({ id: app.id, data: { is_blocked: checked } })
+                        }
+                        className="data-[state=checked]:bg-violet-600"
+                      />
+                      <button
+                        onClick={() => deleteMutation.mutate(app.id)}
+                        className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </div>
+        )}
+
+        {/* Popular Apps */}
+        <div>
+          <h3 className="text-white font-semibold mb-3">Apps Populares</h3>
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <Input
+              placeholder="Buscar apps..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 bg-slate-800 border-slate-700 text-white"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {filteredPopular.map((app) => (
+              <motion.button
+                key={app.name}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleAddPopular(app)}
+                className="flex flex-col items-center gap-2 p-4 rounded-2xl bg-slate-900/50 border border-white/5 hover:border-violet-500/30 transition-colors"
+              >
+                <span className="text-3xl">{app.icon}</span>
+                <span className="text-white text-xs font-medium text-center">{app.name}</span>
+              </motion.button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Add Custom App Sheet */}
+      <Sheet open={showForm} onOpenChange={setShowForm}>
+        <SheetTrigger asChild>
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            className="fixed bottom-24 right-5 w-14 h-14 bg-gradient-to-br from-violet-500 to-violet-700 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/30"
+          >
+            <Plus className="w-6 h-6 text-white" />
+          </motion.button>
+        </SheetTrigger>
+        <SheetContent side="bottom" className="bg-slate-900 border-slate-800 rounded-t-3xl">
+          <SheetHeader>
+            <SheetTitle className="text-white text-left">Adicionar App</SheetTitle>
+          </SheetHeader>
+          <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+            <Input
+              placeholder="Nome do app"
+              value={newApp.name}
+              onChange={(e) => setNewApp({ ...newApp, name: e.target.value })}
+              className="bg-slate-800 border-slate-700 text-white"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-slate-400 text-sm mb-2 block">Ícone</label>
+                <div className="flex flex-wrap gap-2">
+                  {["📱", "📸", "🎵", "💬", "▶️", "🎬", "🎮", "🛒"].map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => setNewApp({ ...newApp, icon: emoji })}
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl ${
+                        newApp.icon === emoji 
+                          ? "bg-violet-500/20 border border-violet-500" 
+                          : "bg-slate-800 border border-slate-700"
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Select
+                value={newApp.category}
+                onValueChange={(v) => setNewApp({ ...newApp, category: v })}
+              >
+                <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                  <SelectValue placeholder="Categoria" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-700">
+                  {Object.entries(categoryConfig).map(([key, val]) => (
+                    <SelectItem key={key} value={key}>
+                      {val.icon} {val.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="w-full bg-violet-600 hover:bg-violet-700 text-white py-6"
+            >
+              {createMutation.isPending ? "Adicionando..." : "Adicionar App"}
+            </Button>
+          </form>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
