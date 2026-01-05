@@ -1,0 +1,271 @@
+import React from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { Trophy, Target, Clock, Flame, TrendingUp, CheckCircle2 } from "lucide-react";
+import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, BarChart, Bar } from "recharts";
+import { format, subDays, startOfDay, isAfter } from "date-fns";
+import { ptBR } from "date-fns/locale";
+
+export default function Stats() {
+  const { data: tasks = [] } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => base44.entities.Task.list("-created_date", 500)
+  });
+
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["focusSessions"],
+    queryFn: () => base44.entities.FocusSession.list("-created_date", 500)
+  });
+
+  // Calculate stats
+  const completedTasks = tasks.filter(t => t.status === "completed");
+  const totalFocusMinutes = sessions.reduce((acc, s) => acc + (s.duration_minutes || 0), 0);
+  const totalFocusHours = Math.round(totalFocusMinutes / 60);
+
+  // Last 7 days data
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const date = subDays(new Date(), 6 - i);
+    const dayStart = startOfDay(date);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
+    const dayTasks = completedTasks.filter(t => {
+      if (!t.completed_at) return false;
+      const completed = new Date(t.completed_at);
+      return completed >= dayStart && completed < dayEnd;
+    });
+
+    const daySessions = sessions.filter(s => {
+      const start = new Date(s.start_time);
+      return start >= dayStart && start < dayEnd;
+    });
+
+    const focusMinutes = daySessions.reduce((acc, s) => acc + (s.duration_minutes || 0), 0);
+
+    return {
+      day: format(date, "EEE", { locale: ptBR }),
+      tasks: dayTasks.length,
+      focus: focusMinutes
+    };
+  });
+
+  // Streak calculation
+  const calculateStreak = () => {
+    let streak = 0;
+    for (let i = 0; i < 30; i++) {
+      const date = subDays(new Date(), i);
+      const dayStart = startOfDay(date);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+
+      const hasTasks = completedTasks.some(t => {
+        if (!t.completed_at) return false;
+        const completed = new Date(t.completed_at);
+        return completed >= dayStart && completed < dayEnd;
+      });
+
+      if (hasTasks) streak++;
+      else if (i > 0) break;
+    }
+    return streak;
+  };
+
+  const streak = calculateStreak();
+
+  // Category distribution
+  const categoryStats = tasks.reduce((acc, task) => {
+    const cat = task.category || "personal";
+    acc[cat] = (acc[cat] || 0) + 1;
+    return acc;
+  }, {});
+
+  const categoryData = Object.entries(categoryStats).map(([key, value]) => ({
+    category: key,
+    count: value
+  }));
+
+  const categoryEmojis = {
+    work: "💼",
+    health: "❤️",
+    personal: "✨",
+    study: "📚",
+    home: "🏠"
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 pb-24">
+      {/* Header */}
+      <div className="px-5 pt-12 pb-6">
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h1 className="text-2xl font-bold text-white">Estatísticas</h1>
+          <p className="text-slate-400 text-sm mt-1">Seu progresso de produtividade</p>
+        </motion.div>
+      </div>
+
+      <div className="px-5 space-y-5">
+        {/* Main Stats */}
+        <div className="grid grid-cols-2 gap-3">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 rounded-2xl bg-gradient-to-br from-violet-500/20 to-violet-600/10 border border-violet-500/20"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Trophy className="w-5 h-5 text-violet-400" />
+              <span className="text-slate-400 text-xs">Total Concluídas</span>
+            </div>
+            <p className="text-3xl font-bold text-white">{completedTasks.length}</p>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/20"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="w-5 h-5 text-emerald-400" />
+              <span className="text-slate-400 text-xs">Tempo Focado</span>
+            </div>
+            <p className="text-3xl font-bold text-white">{totalFocusHours}h</p>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-500/20"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Flame className="w-5 h-5 text-amber-400" />
+              <span className="text-slate-400 text-xs">Sequência</span>
+            </div>
+            <p className="text-3xl font-bold text-white">{streak} dias</p>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/20"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Target className="w-5 h-5 text-blue-400" />
+              <span className="text-slate-400 text-xs">Sessões de Foco</span>
+            </div>
+            <p className="text-3xl font-bold text-white">{sessions.length}</p>
+          </motion.div>
+        </div>
+
+        {/* Weekly Tasks Chart */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="p-5 rounded-3xl bg-slate-900/50 border border-white/5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp className="w-5 h-5 text-violet-400" />
+            <h3 className="text-white font-semibold">Tarefas - Últimos 7 dias</h3>
+          </div>
+          <div className="h-40">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={last7Days}>
+                <defs>
+                  <linearGradient id="taskGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis 
+                  dataKey="day" 
+                  axisLine={false} 
+                  tickLine={false}
+                  tick={{ fill: "#64748b", fontSize: 12 }}
+                />
+                <YAxis hide />
+                <Area
+                  type="monotone"
+                  dataKey="tasks"
+                  stroke="#8b5cf6"
+                  strokeWidth={2}
+                  fill="url(#taskGradient)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </motion.div>
+
+        {/* Focus Time Chart */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="p-5 rounded-3xl bg-slate-900/50 border border-white/5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="w-5 h-5 text-emerald-400" />
+            <h3 className="text-white font-semibold">Tempo de Foco (min)</h3>
+          </div>
+          <div className="h-40">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={last7Days}>
+                <XAxis 
+                  dataKey="day" 
+                  axisLine={false} 
+                  tickLine={false}
+                  tick={{ fill: "#64748b", fontSize: 12 }}
+                />
+                <YAxis hide />
+                <Bar 
+                  dataKey="focus" 
+                  fill="#10b981" 
+                  radius={[4, 4, 0, 0]}
+                  opacity={0.8}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </motion.div>
+
+        {/* Category Distribution */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="p-5 rounded-3xl bg-slate-900/50 border border-white/5"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle2 className="w-5 h-5 text-amber-400" />
+            <h3 className="text-white font-semibold">Por Categoria</h3>
+          </div>
+          <div className="space-y-3">
+            {categoryData.map((item, index) => (
+              <div key={item.category} className="flex items-center gap-3">
+                <span className="text-2xl">{categoryEmojis[item.category] || "📋"}</span>
+                <div className="flex-1">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-400 capitalize">{item.category}</span>
+                    <span className="text-white font-medium">{item.count}</span>
+                  </div>
+                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${(item.count / tasks.length) * 100}%` }}
+                      transition={{ delay: 0.1 * index, duration: 0.5 }}
+                      className="h-full bg-gradient-to-r from-violet-500 to-violet-600 rounded-full"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
