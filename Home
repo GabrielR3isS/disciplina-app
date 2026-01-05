@@ -1,0 +1,188 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { CheckCircle2, Target, Flame, Shield } from "lucide-react";
+
+import StatsCard from "@/components/dashboard/StatsCard";
+import TaskPreview from "@/components/dashboard/TaskPreview";
+import BlockedAppsPreview from "@/components/dashboard/BlockedAppsPreview";
+import FocusButton from "@/components/dashboard/FocusButton";
+import CalendarEvents from "@/components/dashboard/CalendarEvents";
+
+export default function Home() {
+  const [focusDuration, setFocusDuration] = useState(0);
+  const queryClient = useQueryClient();
+
+  const { data: tasks = [] } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => base44.entities.Task.list("-created_date", 100)
+  });
+
+  const { data: blockedApps = [] } = useQuery({
+    queryKey: ["blockedApps"],
+    queryFn: () => base44.entities.BlockedApp.list("-created_date", 100)
+  });
+
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["focusSessions"],
+    queryFn: () => base44.entities.FocusSession.list("-created_date", 100)
+  });
+
+  const activeSession = sessions.find(s => s.is_active);
+  const pendingTasks = tasks.filter(t => t.status === "pending");
+  const completedToday = tasks.filter(t => {
+    if (!t.completed_at) return false;
+    const today = new Date();
+    const completed = new Date(t.completed_at);
+    return completed.toDateString() === today.toDateString();
+  });
+
+  const isLocked = pendingTasks.length > 0 && activeSession;
+
+  // Focus timer
+  useEffect(() => {
+    if (activeSession) {
+      const interval = setInterval(() => {
+        const start = new Date(activeSession.start_time);
+        const now = new Date();
+        const diff = Math.floor((now - start) / 60000);
+        setFocusDuration(diff);
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setFocusDuration(0);
+    }
+  }, [activeSession]);
+
+  const createSessionMutation = useMutation({
+    mutationFn: () => base44.entities.FocusSession.create({
+      start_time: new Date().toISOString(),
+      is_active: true,
+      tasks_completed: 0
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["focusSessions"] })
+  });
+
+  const endSessionMutation = useMutation({
+    mutationFn: (session) => base44.entities.FocusSession.update(session.id, {
+      is_active: false,
+      end_time: new Date().toISOString(),
+      duration_minutes: focusDuration,
+      tasks_completed: completedToday.length
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["focusSessions"] })
+  });
+
+  const completeTaskMutation = useMutation({
+    mutationFn: (task) => base44.entities.Task.update(task.id, {
+      status: "completed",
+      completed_at: new Date().toISOString()
+    }),
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      
+      // Show celebration notification if enabled
+      const settings = await base44.entities.NotificationSettings.list();
+      if (settings[0]?.completion_celebration && "Notification" in window && Notification.permission === "granted") {
+        new Notification("🎉 Tarefa Concluída!", {
+          body: "Parabéns! Continue assim!",
+          icon: "/icon-192.png"
+        });
+      }
+    }
+  });
+
+  const handleToggleFocus = () => {
+    if (activeSession) {
+      endSessionMutation.mutate(activeSession);
+    } else {
+      createSessionMutation.mutate();
+    }
+  };
+
+  const streak = sessions.length > 0 ? Math.min(sessions.length, 7) : 0;
+
+  return (
+    <div className="min-h-screen bg-slate-950 pb-24">
+      {/* Header */}
+      <div className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-violet-600/20 to-transparent" />
+        <div className="relative px-5 pt-12 pb-6">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center justify-between"
+          >
+            <div>
+              <h1 className="text-2xl font-bold text-white">FocusLock</h1>
+              <p className="text-slate-400 text-sm mt-1">Discipline is freedom</p>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-violet-700 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-white" />
+            </div>
+          </motion.div>
+        </div>
+      </div>
+
+      <div className="px-5 space-y-5">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 gap-3">
+          <StatsCard 
+            icon={CheckCircle2} 
+            label="Concluídas Hoje" 
+            value={completedToday.length}
+            color="green"
+            delay={0}
+          />
+          <StatsCard 
+            icon={Target} 
+            label="Pendentes" 
+            value={pendingTasks.length}
+            color="amber"
+            delay={0.1}
+          />
+          <StatsCard 
+            icon={Flame} 
+            label="Sequência" 
+            value={`${streak} dias`}
+            color="violet"
+            delay={0.2}
+          />
+          <StatsCard 
+            icon={Shield} 
+            label="Apps Bloqueados" 
+            value={blockedApps.filter(a => a.is_blocked).length}
+            color="blue"
+            delay={0.3}
+          />
+        </div>
+
+        {/* Focus Button */}
+        <FocusButton 
+          isActive={!!activeSession}
+          onToggle={handleToggleFocus}
+          duration={focusDuration}
+        />
+
+        {/* Tasks Preview */}
+        <TaskPreview 
+          tasks={tasks} 
+          onComplete={(task) => completeTaskMutation.mutate(task)}
+        />
+
+        {/* Blocked Apps Preview */}
+        <BlockedAppsPreview 
+          blockedApps={blockedApps}
+          isLocked={isLocked}
+        />
+
+        {/* Calendar Events */}
+        <CalendarEvents 
+          tasks={tasks}
+          sessions={sessions}
+        />
+      </div>
+    </div>
+  );
+}
